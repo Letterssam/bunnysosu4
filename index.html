@@ -274,6 +274,8 @@ ol.steps{margin:4px 0;padding-left:1.4em;font-size:.95rem}
 .pill.ok{background:var(--okbg);color:var(--ok);border:1px solid var(--ok)}
 @media (max-width:640px){.chestimg{width:90px}.chestcard{padding:12px}}
 .chesthead > div:last-child{flex:1;min-width:240px}
+.login input[readonly]{background:#EFE6C8;color:var(--soft)}
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--ink);color:var(--y1);font-family:'Jua',sans-serif;font-size:1.1rem;padding:10px 22px;border-radius:999px;z-index:80;animation:pop .4s;box-shadow:0 4px 0 var(--y3)}
 </style></head><body><main id="app"></main><script>
 /* =========================================================
    ★ 선생님 설정 ★
@@ -282,8 +284,8 @@ ol.steps{margin:4px 0;padding-left:1.4em;font-size:.95rem}
    BOSS_ALWAYS_OPEN: true 로 바꾸면 최종 보스가 처음부터 열림 (선생님 미리보기용)
    ========================================================= */
 const CONFIG = {
-  SCRIPT_URL: "https://script.google.com/macros/s/AKfycbw6FNPhRBulM9ZAL5xq5LTJVTbOXFS6mwXCD1zYASh60WlIFnMxUYYI5C_eRZ-RMDSsaA/exec",
-  CLEAR_SCORE: 80,
+  SCRIPT_URL: "",
+  CLEAR_SCORE: 70,
   BOSS_ALWAYS_OPEN: false,
   GRADE: 4
 };
@@ -844,7 +846,7 @@ const store = {
 };
 let student = store.get('student', null), prof = null;
 const sid = () => student ? `${student.grade}-${student.cls}-${student.num}-${student.name}` : 'guest';
-function loadProf() { loadChest(); prof = Object.assign({ xp: 0, items: [], equip: {}, best: {}, boss: false, bossWins: 0 }, store.get('p_' + sid(), {})); }
+function loadProf() { loadChest(); prof = Object.assign({ nick: true, xp: 0, items: [], equip: {}, best: {}, boss: false, bossWins: 0 }, store.get('p_' + sid(), {})); }
 function saveProf() { store.set('p_' + sid(), prof); }
 const isClear = L => Math.max(prof.best[L + 'b'] ?? -1, prof.best[L + 'a'] ?? -1) >= CONFIG.CLEAR_SCORE;
 const clearCount = () => LESSONS.filter(L => isClear(L.id)).length;
@@ -978,20 +980,44 @@ function bindTop() { const b = $('[data-logout]'); if (b) b.onclick = () => { st
 function scrollTop() { window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' }); }
 
 /* ================= 로그인 ================= */
+/* 반 전용 링크: …/index.html?grade=4&class=3 */
+const URLP = new URLSearchParams(location.search);
+const LINK = { grade: (URLP.get('grade') || '').trim(), cls: (URLP.get('class') || '').trim() };
+/* 예전(실명) 기록을 닉네임 기록으로 옮기고, 실명이 담긴 저장 키는 지웁니다 */
+let OLD = null;
+function migrateOld(newSid, g, c, n) {
+  try {
+    const pre = 'bunny43:p_', mine = `${g}-${c}-${n}-`; let best = null;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i); if (!k.startsWith(pre + mine)) continue;
+      const id = k.slice(pre.length); if (id === newSid) continue;
+      const p = JSON.parse(localStorage.getItem(k)); if (p && !p.nick && (!best || (p.xp || 0) > (best.p.xp || 0))) best = { id, p };
+    }
+    if (!best) return false;
+    if (!localStorage.getItem(pre + newSid)) { best.p.nick = true; store.set('p_' + newSid, best.p); const ch = store.get('chest_' + best.id, null); if (ch) store.set('chest_' + newSid, ch); }
+    localStorage.removeItem(pre + best.id); localStorage.removeItem('bunny43:chest_' + best.id);
+    return true;
+  } catch (e) { return false; }
+}
+function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 3500); }
 function renderLogin() {
   app().innerHTML = `<div class="wrap"><form class="card login" onsubmit="return false">
     <div style="text-align:center">${heroSVG(3).replace('class="hero ', 'class="hero bunny ')}</div>
-    <h2 style="text-align:center">토끼와 소수 대모험</h2><p class="muted" style="text-align:center">문제를 풀면 내 토끼가 자라요! 내 정보를 적고 시작해요.</p>
-    <div class="row"><label for="g">학년</label><input id="g" type="number" min="1" max="6" value="${CONFIG.GRADE}" inputmode="numeric"></div>
-    <div class="row"><label for="c">반</label><input id="c" type="number" min="1" max="20" inputmode="numeric"></div>
-    <div class="row"><label for="n">번호</label><input id="n" type="number" min="1" max="40" inputmode="numeric"></div>
-    <div class="row"><label for="nm">이름</label><input id="nm" type="text" maxlength="10" autocomplete="off"></div>
+    <h2 style="text-align:center">토끼와 소수 대모험</h2><p class="muted" style="text-align:center">문제를 풀면 내 토끼가 자라요! 내 정보를 적고 시작해요.</p>${OLD ? '<p class="callout" style="margin:8px 0">이제 이름 대신 <b>닉네임</b>을 써요. 번호를 확인하고 닉네임을 정해 주세요. 지금까지 키운 토끼는 그대로 데려올게요!</p>' : ''}${LINK.cls ? `<p style="text-align:center"><span class="badge">${esc(LINK.grade || CONFIG.GRADE)}학년 ${esc(LINK.cls)}반 전용 링크</span></p>` : ''}
+    <div class="row"><label for="g">학년</label><input id="g" type="number" min="1" max="6" value="${esc(LINK.grade || CONFIG.GRADE)}" ${LINK.grade ? 'readonly' : ''} inputmode="numeric"></div>
+    <div class="row"><label for="c">반</label><input id="c" type="number" min="1" max="20" inputmode="numeric" ${LINK.cls ? `value="${esc(LINK.cls)}" readonly` : (OLD ? `value="${esc(OLD.cls)}"` : '')}></div>
+    <div class="row"><label for="n">번호</label><input id="n" type="number" min="1" max="40" inputmode="numeric" ${OLD ? `value="${esc(OLD.num)}"` : ''}></div>
+    <div class="row"><label for="nm">닉네임</label><input id="nm" type="text" maxlength="10" autocomplete="off" placeholder="예) 당근대장"></div>
+    <p class="muted" style="margin:4px 0 0">실제 이름은 쓰지 말고 나만의 <b>닉네임</b>을 써요. 다음에도 <b>똑같은 닉네임</b>을 써야 내 토끼를 다시 만날 수 있어요.</p>
     <div class="warn" id="lw"></div><div class="btns" style="justify-content:center"><button class="btn primary" type="button" id="go">모험 시작하기</button></div></form></div>`;
   $('.login svg').style.width = '150px';
   const go = () => {
     const g = $('#g').value.trim(), c = $('#c').value.trim(), n = $('#n').value.trim(), nm = $('#nm').value.trim();
-    if (!g || !c || !n || !nm) { $('#lw').textContent = '학년, 반, 번호, 이름을 모두 적어 주세요.'; return; }
-    student = { grade: g, cls: c, num: n, name: nm }; store.set('student', student); loadProf(); flush(); renderHome();
+    if (!g || !c || !n || !nm) { $('#lw').textContent = '학년, 반, 번호, 닉네임을 모두 적어 주세요.'; return; }
+    if (nm.length < 2) { $('#lw').textContent = '닉네임은 두 글자 이상으로 지어 주세요.'; return; }
+    student = { grade: g, cls: c, num: n, name: nm, nick: true }; store.set('student', student);
+    const moved = migrateOld(sid(), g, c, n); OLD = null;
+    loadProf(); saveProf(); flush(); renderHome(); if (moved) toast('예전에 키운 토끼를 그대로 데려왔어요!');
   };
   $('#go').onclick = go; $('.login').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
 }
@@ -1317,5 +1343,7 @@ function chestDone() {
   if (lvUp.after > lvUp.before) levelUpModal(lvUp.after);
 }
 /* ================= 시작 ================= */
-if (student) { loadProf(); flush(); renderHome(); } else renderLogin();
+const linkMismatch = () => student && ((LINK.cls && String(student.cls) !== LINK.cls) || (LINK.grade && String(student.grade) !== LINK.grade));
+if (student && !student.nick) { OLD = student; student = null; store.set('student', null); renderLogin(); }
+else if (student && !linkMismatch()) { loadProf(); flush(); renderHome(); } else renderLogin();
 </script></body></html>
